@@ -1,0 +1,286 @@
+---
+title: "Proyecto_modulo3"
+author: "Roberto_Rodriguez"
+date: '`r Sys.Date()`'
+output: github_document
+---
+
+Para desarrollar el caso practico del modulo 3, se cargan las librerias necesarias.
+
+```{r packages, include=FALSE}
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(forecast)
+library(tidyverse)
+library(datarium)
+library(ggplot2)
+library(lmtest)
+library(car)
+library(sandwich)
+library(strucchange)
+```
+
+Una vez cargadas las librerias, se obtuvo informacion de oferta monetaria del Banco Central de Bolivia, y de las exportaciones del Instituto Nacional de Estadistica de Bolivia.
+
+A continuacion se muestran los primeros y los utlimos seis datos de cada variable, que reflejan la evolucion mensual de ambas variables desde 2008 a 2022, expresadas en millones de dolares americanos. Adicionalmente, se realiza la transformacion de la informacion para que Rstudio las reconozca como series de tiempo.
+
+```{r base, echo=FALSE}
+base <- read_xlsx("D:\\Ciencia de datos\\Modulo 3\\Base_modulo3.xlsx")
+base <- base[,2:3]
+tsbase <- ts(base, start = c(2008,1), frequency = 12)
+head(tsbase, 6)
+tail(tsbase,6)
+```
+
+## Graficos
+
+A continuacion, se grafican ambas series de tiempo para analizar su evolucion.
+
+```{r graficos, echo=FALSE, fig.width=12}
+par(mfrow=c(1,2))
+plot(tsbase[,"Export"])
+plot(tsbase[,"Of_mon_M2"])
+```
+
+Las exportaciones tienen una evolucion que tiene relacion con el crecimiento economico en Bolivia. Desde 2009 a 2014, la economia boliviana estuvo en auge, con ingresos extraordinarios por venta de gas a Brasil y Argentina, aprovechando precios altos del crudo en este periodo. Posteriormente, una vez los precios del petroleo comenzaron a caer, las exportaciones en valor se redujeron con una fuerte caida durante el periodo de la pandemia COVID-19. Luego se observa un repunte, ya que los precios de materias primas se incrementaron con fuerza años posteriores a la pandemia, corrigiendose en 2022.
+
+En el caso de la oferta monetaria, se observa una serie con tendencia creciente, con una aparente una evolucion estacional.
+
+# Sección A
+## Tasas de crecimiento promedio
+
+```{r tasas_crecimiento}
+tasa_expor <- tslm(log(tsbase[,1]) ~ trend, data = tsbase)
+summary(tasa_expor)
+(exp(0.001946)-1)*100
+
+tasa_m2 <- tslm(log(tsbase[,2]) ~ trend, data = tsbase)
+summary(tasa_m2)
+(exp(0.0078763)-1)*100
+```
+
+En promedio, las exportaciones crecieron mensualmente un 0,19% y la oferta monetaria en un 0,79%.
+
+# Sección B
+### Modelo de regresión multiple
+
+Se utilizara la base de datos de "marketing", de la librearia "datarium", que muestra datos de ventas y gastos de marketing en distintas plataformas.
+
+```{r modelo_1}
+head(marketing,6)
+names(marketing)
+model0 <- lm(sales ~ youtube + facebook + newspaper, data = marketing)
+summary(model0)
+```
+Lo primero que se observa es que tanto el gasto de marketing en la plataforma Youtube como en Facebook generan un incremento de las ventas, en tanto que el anunciar publicidad en periodico impreso tendria un efecto negativo en ventas. Sin embargo, al observar la significancia de los parametros se observa que el parametro asociado a newspaper no es significativo, ya que su valor p es mayor a 0.05. Por lo tanto se eliminara esta variable del analisis.
+
+```{r modelo_2}
+model1 <- lm(sales ~ youtube + facebook, data = marketing)
+summary(model1)
+```
+
+Prueba de significancia individual:
+Todos los parametros tienen un valor t mayor a 2 o un nivel Pr menor a 0.05. Por tanto, con el model1, todos los parametros son significativos y tienen los signos esperados. El R2 es 0.89, con lo que la regresion lineal se ajusta adecuadamente a los datos. Es decir, el incremento de 1 dolar de gasto en marketing en la plataforma Youtube genera un incremento de 0.04 dolares en las ventas. Por otra parte, el incremento de 1 dolar de gasto de marketing en Facebook, genera un incremento de 0.19 dolares en las ventas. Es mas rentable realizar un mayor marketing a traves de Facebook.
+
+# Pruebas de autocorrelacion
+## 1ra prueba. Se realizara el analisis grafico de los residuos
+
+```{r corre_graph1}
+par(mfrow=c(1,1))
+plot(model1$residuals, type = "b")
+```
+
+Los errores parecen ser aleatorios.
+
+```{r corre_graph2}
+qplot(x=c(tail(model1$residuals, -1),0),
+      y=model1$residuals)
+```
+
+Con este grafico, no se observa alguna relacion entre los residuos y los residuos rezagados un periodo.
+
+## 2da prueba. Prueba de Durbin-Watson
+
+```{r corre_dw}
+dwtest(model1)
+```
+
+La hipotesis nula es que no hay autocorrelacion como el valor p es grande, mayor a 0.05, entonces no se rechaza la hipotesis nula, con lo no hay autocorrelacion.
+Ahora se busca en tablas de puntos criticos.
+No hay autocorrelacion positiva, ya que con los datos en tablas, con un k=2 y n=200 son: dL=1.748 y dU=1.789, el valor DW obtenido con el test no se encuentra en este rango. Como no se cumple lo anterior, entonces no rechazo la hipotesis nula, con lo que no se tiene autocorrelacion.
+
+
+4-dL<2.0808<4-dU
+
+
+1.789<2.0808<2.211
+
+No se rechaza la hipotesis de que no hay autocorrelacion, ni positiva, ni negativa.
+
+## 3ra prueba. Breusch-Godfrey test.
+
+```{r corre_BGtest}
+bgtest(model1, order = 1)
+```
+
+El valor p es mayor a 0.05, por tanto no se rechaza hipotesis nula. Entonces, se concluye que no hay autocorrelacion.
+
+
+Se concluye que los residuos no estan correlacionados, con lo que las pruebas de significancia son validas y intervalos de confianza son correctos, y el R2 del modelo no esta sobre-estimado.
+
+# Pruebas de heteroscedasticidad
+## 1ra prueba. Observacion grafica
+
+```{r heteros_graph1}
+qplot(x=model1$fitted.values,
+      y=(model1$residuals))+
+  geom_point()
+```
+
+Hay una relativa forma en U, por lo que se puede sospechar que hay heteroscedasticidad. Ahora se observara los patrones de cada una de las variables.
+
+```{r heteros_graph2}
+data_model <- marketing
+attach(data_model)
+qplot(x=log(data_model$youtube),
+      y=(model1$residuals))+
+  geom_point()
+
+qplot(x=log(data_model$facebook),
+      y=(model1$residuals))+
+  geom_point()
+```
+
+No se observan patrones claros.
+
+## 2da prueba. Breusch-Pagan Test
+
+```{r heteros_bptest}
+bptest(model1)
+```
+
+Con el valor p mayor a 0.05, no se rechaza la hipotesis nula. Por tanto, el modelo parece no tener heteroscedasticidad.
+
+## 3ra prueba. Score Test for Non-Constant Error Variance
+
+```{r heteros_ncvTest}
+ncvTest(model1)
+```
+
+Como el valor p es menor a 0.05, entonces se rechaza la nula, por lo que el modelo podria tener el problema de heteroscedasticidad.
+
+## 4ta prueba. Contraste Glejser
+
+```{r heteros_Glesjer_youtube}
+test1 <- lm(abs(model1$residuals)~log(youtube),
+              data = data_model)
+
+summary(test1)
+```
+
+La significancia de la variable Youtube muestra que esta variable puede estar afectando al problema de heteroscedasticidad.
+
+
+Ahora veremos esta prueba con el resto de variables.
+
+```{r heteros_Glesjer_all}
+data_model <- mutate(data_model,
+                     logfb = log(facebook))
+str(data_model)
+is.infinite(data_model$logfb)
+data_model$logfb[is.infinite(data_model$logfb)] <- NA
+test2 <- lm(abs(model1$residuals)~logfb,
+              data = data_model)
+summary(test2)
+```
+
+El coeficiente es significativo con ambas variables, por lo que cada una puede estar generando el problema de heteroscedasticidad.
+
+## 5ta prueba. Goldfeld-Quandt Test
+
+```{r heteros_GQtest1}
+gqtest(model1, order.by = ~log(youtube), data = data_model)
+```
+
+En este caso, no se rechaza la nula por tanto no hay heteroscedasticidad.
+
+
+Aplicando el test con otras variables.
+
+```{r heteros_GQtest2}
+gqtest(model1, order.by = ~log(facebook), data = data_model)
+```
+
+Se rechaza la hipotesis nula. Por tanto, la variable facebook puede ser la variable que esta generando heteroscedasticidad.
+
+# Atenuacion del problema de heteroscedasticidad
+## Errores estandar libres de heteroscedasticidad
+
+```{r atenuar_heteros}
+modelohac <- coeftest(model1, vcov = vcovHC(model1))
+modelohac
+summary(model1)
+```
+
+Contrariamente a lo esperado, en el modelo HAC, que se tiene los errores estandar corregidos por heteroscedasticidad, los errores estandar son mas altos que los obtenidos con el model1. En este caso, podriamos concluir que de acuerdo al analisis grafico, el test de Breusch-Pagan y el test Goldfeld-Quandt Test, el modelo no presenta heteroscedasticidad, por lo que las varianzas y por tanto las desviaciones estandar de los parametros estimados son confiables, lo que hace que los test de significancia sean correctos.
+
+
+Ahora se observaran si los intervalos de confianza de ambas variables son modificadas en gran medida con el model1 y el modelo hac
+
+```{r intervalo1}
+sum1 <- summary(model1)
+ls1 <- sum1$coefficients[2]+1.96*sum1$coefficients[,2][2]
+li1 <- sum1$coefficients[2]-1.96*sum1$coefficients[,2][2]
+ls2 <- modelohac[2]+1.96*modelohac[,2][2]
+li2 <- modelohac[2]-1.96*modelohac[,2][2]
+data.frame(ls1,li1,ls2,li2)
+```
+
+No hay una diferencia en los intervalos, por lo que se considera que no existe un problema de heteroscedasticidad.
+
+
+Ahora se observara los intervalos para la segunda variable.
+
+```{r intervalo2}
+sum1 <- summary(model1)
+ls1_fb <- sum1$coefficients[3]+1.96*sum1$coefficients[,2][3]
+li1_fb <- sum1$coefficients[3]-1.96*sum1$coefficients[,2][3]
+ls2_fb <- modelohac[3]+1.96*modelohac[,2][3]
+li2_fb <- modelohac[3]-1.96*modelohac[,2][3]
+data.frame(ls1_fb,li1_fb,ls2_fb,li2_fb)
+```
+
+Como en el caso del parametro de la variable Youtube, en este caso tampoco existe una diferencia significativa en los intervalos, por lo que se considera que no existe un problema de heteroscedasticidad.
+
+# Contrastes de estabilidad de los parametros
+
+## Cumulative Sums of standarized residuals (CUSUM)
+
+```{r estabilidad1}
+ols <- efp(model1, data = marketing,
+           type = "OLS-CUSUM")
+plot(ols)
+sctest(model1, type="OLS-CUSUM", data=marketing)
+```
+
+Conforme a los resultados del test CUSUM aplicados a los datos, en el grafico se puede observar que los parametros son estables ya que la linea negra no sobrepasan en ningun punto el intervalo de confianza, ni tampoco tiene un comportamiento muy fluctuante.
+
+Asimismo, teniendo en consideracion las siguiente prueba de hipotesis:
+
+
+H0: no cambio estructural
+H1: cambio estructural
+
+Como el valor p es mayor a 0,05, entonces no rechazamos la hipotesis nula, con lo que se puede afirmar que no existe un cambio estructural y por tanto los parametros son estables en el tiempo.
+
+```{r estabilidad2}
+olms <- efp(model1, data = marketing,
+           type = "OLS-MOSUM")
+plot(olms)
+```
+
+Al igual que en el anterior grafico, se puede observar que la linea negra no sobrepasa el intervalo de confianza, por tanto, se confirma la estabilidad del modelo y por tanto de los parametros estimados.
+
+
+
