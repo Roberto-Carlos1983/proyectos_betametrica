@@ -1,0 +1,240 @@
+---
+title: "Practica_modulo4_Roberto_Rodriguez"
+author: "Roberto_Rodriguez"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r librerias, include=FALSE}
+library(xlsx)
+library(dplyr)
+library(ResourceSelection)
+library(QuantPsyc)
+library(ROCR)
+library(Epi)
+library(reshape2)
+library(gridExtra)
+library(ggplot2)
+library(plotly)
+```
+
+# Carga de la base de datos
+
+A continuacion se observaran los nombres de las variables, los primeros y ultimos seis datos de la base de datos cargada.
+
+```{r carga, echo=F}
+db <- read.csv("D:\\Ciencia de datos\\Modulo 4\\Material\\germancredit.csv")
+names(db)
+head(db,6)
+tail(db,6)
+```
+
+# Estimacion de los modelos
+
+```{r modelos1, echo=FALSE}
+db1 <- mutate(db, age2 = age^2)
+attach(db1)
+base <- dplyr::select(db1, Default, duration, amount, installment, age, age2, cards)
+
+names(base)
+attach(base)
+logit <- glm(Default~., family = binomial(logit), data = base)
+probit <- glm(Default~., family = binomial(probit), data = base)
+
+summary(logit)
+exp(coef(logit))
+summary(probit)
+```
+
+En ambos casos, la variable cards no es significativa, por tanto se la retirara de ambos modelos y se volveran a estimar las regresiones.
+
+```{r modelos2, echo=FALSE}
+base1 <- dplyr::select(db1, Default, duration, amount, installment, age, age2)
+attach(base1)
+
+logit1 <- glm(Default~., family = binomial(logit), data = base1)
+probit1 <- glm(Default~., family = binomial(probit), data = base1)
+
+summary(logit1)
+summary(probit1)
+```
+
+En los modelos estimados anteriormente, todas las variables son significativas.
+
+
+Observado el valor de los parametros estimados, la variable "installment" (cuotas pagadas) es la que afecta en mayor medida a la probabilidad de ser mal pagador (en ambos modelos), lo que pareceria ser contraintuitivo, ya que se esperaria que mientras un cliente ha pagado una mayor cantidad de cuotas, es probable que lo siga haciendo y por tanto tendria que reducir la probabilidad de ser mal pagador.
+
+
+Finalmente, en el caso del modelo logit, se pueden calcular el exponencial de los parametros calculados, para tener una interpretacion del numero de veces que incrementa la probabilidad de ser mal pagador.
+
+```{r exponen_logit, echo=FALSE}
+exp(coef(logit1))
+```
+
+Los resultados indican que en el caso de la variable "installment", es 1,24 veces mas probable que un cliente sea mal pagador a medida que se incrementa el numero de cuotas pagadas.
+
+# Contrastes
+
+## Hosmer-Lemeshow Goodness of Fit (GOF) Test
+
+```{r HLtest}
+hl1 <- hoslem.test(base1$Default, fitted(logit1), g=10)
+hl2 <- hoslem.test(base1$Default, fitted(probit1), g=10)
+hl1
+hl2
+```
+
+En el test Hosmer-Lemeshow se testea la siguiente prueba de hipotesis:
+
+
+Ho: Bondad de Ajuste
+
+H1: no bondad de ajuste
+
+
+En ambos modelos, como el valor p es mayor a 0.05, entonces no se rechaza la hipotesis nula, por lo que parece que ambos modelos tienen una buena bondad de ajuste.
+
+## Matriz de confusion
+
+En primer lugar se difinira un threshold, en base a la media de los valores proyectados por los modelos logit y probit.
+
+```{r threshold_media}
+threshold_log <- mean(fitted(logit1))
+threshold_prob <- mean(fitted(probit1))
+
+threshold_log
+threshold_prob
+```
+
+Con los valores anteriormente calculados, se elaboran las matrices.
+
+```{r matriz_confu1}
+ClassLog(logit1,base1$Default,cut = threshold_log)
+ClassLog(probit1,base1$Default,cut = threshold_prob)
+```
+
+En ambos modelos, los porcentaje de clasificacion de ceros cuando son ceros, y de unos cuando son unos, son muy cercanos a 0.5, sobre todo en el caso de los unos cuandos son unos, por lo que parecieran no ser buenos modelos, esto ya que significaria que solo el 50% de las veces me clasifica correctamente, lo cual realmente podria no justificar el uso de un modelo econometrico.
+
+
+Finalmente, los porcentajes de clasificacion global son cercanos de 60%, lo que se considera que no es muy alto y por tanto podriamos estar ante la presencia de un modelo no muy robusto.
+
+## Curvas ROC
+
+```{r ROC}
+predictive_logit <- prediction(logit1$fitted.values, base1$Default)
+predictive_probit <- prediction(probit1$fitted.values, base1$Default)
+
+perfl <- performance(predictive_logit, 
+                     measure = "tpr", 
+                     x.measure = "fpr")
+
+perfp <- performance(predictive_probit, 
+                     measure = "tpr", 
+                     x.measure = "fpr")
+
+plot(perfl, colorize=T,lty=3)
+abline(0,1,col="black")
+
+plot(perfp, colorize=T,lty=3)
+abline(0,1,col="black")
+```
+
+Ambas curvas ROC, deberian estar lo mas alejada de la recta de 45 grados, lo que claramente no se observa.
+
+## Area bajo la curva
+
+```{r auc}
+aucl <- performance(predictive_logit, measure = "auc")
+aucl <- aucl@y.values[[1]]
+aucl
+
+aucp <- performance(predictive_probit, measure = "auc")
+aucp <- aucp@y.values[[1]]
+aucp
+```
+
+Las areas bajo la curva presentan un valor muy bajo, ya que hasta un 80% es aceptable. Pero valores de 0.65 son muy bajos significaria que no se esta recogiendo informacion util del modelo para obtener un estimacion de la variable dependiente.
+
+## Puntos de corte optimos
+
+Para el caso del modelo logit.
+
+```{r punto_corte_logit, warning=FALSE}
+perf2 <- performance(predictive_logit,"sens","spec")
+
+sen2 <- slot(perf2,"y.values")[[1]]
+esp2 <- slot(perf2,"x.values")[[1]]
+alf2 <- slot(perf2,"alpha.values")[[1]]
+
+mat2 <- data.frame(alf2,sen2,esp2)
+m2<- melt(mat2,id=c("alf2"))
+p2 <- ggplot(m2,aes(alf2,value,group=variable,
+                    colour=variable))+
+  geom_line(size=1.2)+
+  labs(title="punto de corte para logit")
+
+p2
+```
+
+El punto de corte optimo para el modelo logit es 0.2887
+
+Para el caso del modelo probit.
+
+```{r punto_corte_probit, warning=FALSE}
+perf1 <- performance(predictive_probit,"sens","spec")
+
+sen <- slot(perf1,"y.values")[[1]]
+esp <- slot(perf1,"x.values")[[1]]
+alf <- slot(perf1,"alpha.values")[[1]]
+
+mat <- data.frame(alf,sen,esp)
+
+m <- melt(mat,id=c("alf"))
+p1 <- ggplot(m,aes(alf,value,group=variable,
+                   colour=variable))+
+  geom_line(size=1.2)+
+  labs(title="punto de corte para probit")
+
+p1
+```
+
+El punto de corte optimo para el modelo probit es 0.2899
+
+## Estimacion de modelos con puntos optimos de corte
+
+```{r threshold_optimo}
+threshold_log1=0.2887
+threshold_prob1=0.2899
+```
+
+Las matrices de confusion o clasificacion con el punto de corte optimo son las siguientes.
+
+```{r matriz_confu2_corte_optimos}
+ClassLog(logit1,base1$Default,cut = threshold_log1)
+ClassLog(probit1,base1$Default,cut = threshold_prob1)
+```
+
+En estas nuevas matrices de confusion, mejora el porcentaje de clasificacion correcta de los 1 cuando son 1; en tanto que, empeora la clasificaion de los ceros cuando son ceros.
+
+
+El porcentaje de clasificacion global de clasificacion correcta es basicamente similar que los calculados con un threshold igual a la media de los valores pronosticados.
+
+Sin embargo, los modelos no son adecuados, ya que la curva ROC esta cerca de la linea de 45 grados.
+
+
+Considerando que el overall es 0.601 para el caso del modelo logit, se considera que este seria el modelo mas adecuado y con el cual se realizara una proyeccion.
+
+```{r proyeccion_logit}
+newdata <- data.frame(duration=65,
+                      amount=15000,
+                      installment=2,
+                      age=48,
+                      age2=48^2)
+
+predict(logit1,newdata,type = "response")
+```
+
+Lo que nos dice el resultado es que la probabilidad de que suceda 1, dadas las caracteristicas de la observacion planteada, es del 63.07%
+
+
+
