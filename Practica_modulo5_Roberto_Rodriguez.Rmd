@@ -1,0 +1,200 @@
+---
+title: "Practica_modulo5_Roberto_Rodriguez"
+author: "Roberto_Rodriguez"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r libraries, include=FALSE}
+library(readxl)
+library(dplyr)
+library(cluster)
+library(ggplot2)
+library(devtools)
+library(factoextra)
+library(fpc)
+library(NbClust)
+library(reshape2)
+```
+
+# Practica modulo 5
+
+## Seleccion de indicadores
+
+```{r indicadores, echo=FALSE}
+db <- read_xlsx("D:\\Ciencia de datos\\Modulo 5\\MACHINE LEARNING 1\\parte 2\\BOL_BP_MAY_ 2017.xlsx",
+                sheet = "INDICADORES", range = "C8:AH99", col_names = TRUE)
+
+db1 <- select(db, c(-"BANCOS PRIVADOS GRANDES", -"BANCOS PRIVADOS MEDIANOS",
+                    -"BANCOS PRIVADOS PEQUEÑOS", -"TOTAL BANCOS PRIVADOS",
+                    -"BANCOS PRIVADOS COMERCIALES", -"BANCOS PRIVADOS CONSUMO",
+                    -"BANCOS PRIVADOS VIVIENDA", -"BANCOS PRIVADOS DE MICROEMPRESA")) %>%
+  na.omit(db)
+  
+db2 <- db1[c(3,19,36,39,60),]
+
+db_transpose <- data.frame(t(db2[-1]))
+colnames(db_transpose)[1] <- "Activos_prod/tot_activos"
+colnames(db_transpose)[2] <- "Morosidad_carteratot"
+colnames(db_transpose)[3] <- "Gastosop/margen_finan"
+colnames(db_transpose)[4] <- "ROA"
+colnames(db_transpose)[5] <- "Liquidez"
+
+base <- data.frame(scale(db_transpose))
+```
+
+Las observaciones normalizadas se muestran en la siguiente tabla.
+
+```{r observaciones, echo=FALSE}
+head(base,23)
+```
+
+# Cluster jerarquico
+
+A continuacion se obtienen cuatro "modelos" de cluster jerarquicos, cada uno resultado de una combinacion diferente de distancia y metodo. En cada uno de ellos, se dividira en cinco clusters.
+
+```{r cluster_jerarquico, echo=FALSE, fig.width=10}
+cluster1 <- hclust(dist(base, method = "euclidean"),
+                  method = "ward.D")
+plot(cluster1)
+rect.hclust(cluster1, k=5, border = "red")
+
+cluster2 <- hclust(dist(base, method = "euclidean"),
+                   method = "average")
+plot(cluster2)
+rect.hclust(cluster2, k=5, border = "red")
+
+cluster3 <- hclust(dist(base, method = "maximum"),
+                   method = "ward.D2")
+plot(cluster3)
+rect.hclust(cluster3, k=5, border = "red")
+
+cluster4 <- hclust(dist(base, method = "manhattan"),
+                   method = "complete")
+plot(cluster4)
+rect.hclust(cluster4, k=5, border = "red")
+```
+
+En general, todos separan al BP CAPITAL y BP VISIONFUND ECUADOR en clusters diferentes.
+
+Considero que el modelo con distancia "euclidean" y metodo "average" no es el adecuado, ya que separa ademas de BP CAPITAL y BP VISIONFUND ECUADOR, al BP LITORAL y BP COMERCIAL DE MANABI en dos cluster diferentes. Esto no me parece bien, debido a que no tiene mucho sentido que de los cinco grupos, cuatro de ellos solamente contengan a un banco, lo cual me muestra que en realidad no se esta realizando una agrupacion. Se esperaria tener clusters con un grupo de bancos y no grupos formados por un solo banco.
+
+
+Probablemente, se deberia probar con otras variables adicionales o calcular nuevas metricas para volver a calcular los clusters. Sin embargo, con base en los indicadores propuestos en el ejercicio, a continuacion se calcula el division coeficient para los cuatro modelos de cluster calculados.
+
+```{r div_coef, echo=FALSE, fig.width=12}
+ncluster1_2 <- diana(base, metric = "euclidean")
+par(mfrow=c(1,2))
+plot(ncluster1_2)
+
+ncluster3 <- diana(base, metric = "maximum")
+par(mfrow=c(1,2))
+plot(ncluster3)
+
+ncluster4 <- diana(base, metric = "manhattan")
+par(mfrow=c(1,2))
+plot(ncluster4)
+```
+
+El modelo cuatro, que tiene una distancia "manhattan" y el metodo "complete", tiene el coeficiente mas alto (0.84). El resto de modelos tiene un coeficiente de 0.82.
+
+En conclusion, con base en la informacion proporcionada de los indicadores financieros, sin analizar informacion sobre sus balances o mayores caracteristicas de los bancos evaluados (en terminos de similitudes por nichos de mercado, tamano de cartera y otras variables), el primer modelo considero que es el mas adecuado, ya que al menos los clusters separan los bancos relativamente igual a la separacion que se tiene en el archivo Excel. Es decir, los cuatro bancos clasificados como bancos grandes estan en el mismo cluster. Lo mismo ocurrre con algunos bancos medianos y pequenos.
+
+# Cluster no jerarquico
+
+En primer lugar se determinara el numero de clusters optimo.
+
+```{r clu_optimo1, echo=FALSE}
+clu1_optimo <- NbClust(base,
+                       distance = "euclidean",
+                       min.nc = 2,
+                       max.nc = 6,
+                       method="ward.D",
+                       index = "all")
+```
+
+Con base en los anteriores resultados, se calcula un cluster no jerarquico con tres clusters.
+
+```{r clus_no_jerar1, echo=FALSE}
+clu2 <- kmeans(base,3)
+clu2
+fviz_cluster(clu2, data = base)
+```
+
+## Evaluando el cluster
+
+Se evaluaran los clusters calculados con el analisis Silhouette, el cual determina cuan bien las observaciones han sido agrupadas.
+
+```{r clus_no_jerar1_eva, echo=FALSE}
+silueta1 <- silhouette(clu2$cluster,dist(base,method="euclidean"))
+fviz_silhouette(silueta1)
+```
+
+Se puede osbervar que en general las observaciones han sido correctamente agrupadas, sin embargo, en los clusters 2 y 3, los valores cercanos a cero estarian indicando que esas observaciones podrian encontrarte entre dos clusters.
+
+
+En mi consideracion, este problema se debe a la existencia de valores atipicos, los cuales se pueden observar a partir de los siguientes diagramas de caja.
+
+```{r boxplot, echo=FALSE, fig.width=12}
+data_long <- melt(base)
+ggplot(data_long, aes(x=variable, y=value)) +
+  geom_boxplot() +
+  facet_wrap(facets = ~variable, scales = "free") +
+  geom_label(aes(label=row.names(data_long)),nudge_x = 0.15)
+```
+
+Se pueden observar valores atipicos en los indicadores de morosidad, eficiencia administrativa, ROA y liquidez.
+
+
+Para resolver el problema de valores atipicos, se realizara una imputacion a los valores atipicos de BP CAPITAL y BP VISIONFUND ECUADOR. Sin ser la mejor opcion para imputar datos y solo para efectos practicos del ejercicio, se imputaran los datos con la mediana que se tiene en cada indicador. Posteriormente se calculara nuevamente el numero de cluster optimo, los clusters como tal y se evaluaran los resultados.
+
+```{r new_cluster, fig.width=12}
+base1 <- base
+summary(base1$ROA)
+summary(base1$Activos_prod.tot_activos)
+summary(base1$Gastosop.margen_finan)
+summary(base1$Liquidez)
+summary(base1$Morosidad_carteratot)
+
+base1[23,4] <- 0.1482
+base1[23,5] <- -0.22366
+
+base1[18,2] <- -0.3409
+base1[18,3] <- -0.2404
+base1[18,4] <- 0.1482
+
+clu1_optimo_ad <- NbClust(base1,
+                       distance = "euclidean",
+                       min.nc = 2,
+                       max.nc = 6,
+                       method="ward.D",
+                       index = "all")
+```
+
+El numero de clusters optimo es 6, de acuerdo al analisis anterior.
+
+```{r estimate_new_cluster, echo=FALSE}
+clu3 <- kmeans(base1,6)
+clu3
+
+fviz_cluster(clu3, data = base1)
+
+silueta2 <- silhouette(clu3$cluster,dist(base1,method="euclidean"))
+
+fviz_silhouette(silueta2)
+```
+
+Como aun se presentan valores negativos en el analisis Silhouette y en el entendido de que es deseable que las observaciones se agrupen en menos clusters, se realizara el ejercicio agrupando en cinco clusters.
+
+```{r final_cluster, echo=FALSE}
+clu4 <- kmeans(base1,5)
+clu4
+
+fviz_cluster(clu4, data = base1)
+
+silueta3 <- silhouette(clu4$cluster,dist(base1,method="euclidean"))
+
+fviz_silhouette(silueta3)
+```
+
+Se considera como adecuado este ultimo calculo de clusters.
