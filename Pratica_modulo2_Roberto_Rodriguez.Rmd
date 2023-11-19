@@ -1,0 +1,89 @@
+---
+title: "Practica_modulo2_Roberto_Rodriguez"
+author: "Roberto_Rodriguez"
+date: "`r Sys.Date()`"
+output: github_document
+always_allow_html: true
+---
+
+```{r librerias, include=FALSE}
+library(xlsx)
+library(ggplot2)
+library(lubridate)
+library(dplyr)
+library(reshape2)
+library(plotly)
+library(dygraphs)
+```
+
+# SECCION A
+
+## Carga de base de datos
+
+```{r base_datos, echo=FALSE}
+base <- read.xlsx("D:\\Ciencia de datos\\Modulo 2\\Base_modulo2.xlsx",
+                  sheetName = "Hoja1", as.data.frame = TRUE)
+
+base1 <- base %>%
+  mutate(anio=year(Periodo),
+         mes=month(Periodo)) %>%
+  select(anio, mes, Export)
+
+str(base)
+```
+
+## Grafico boxplot
+
+```{r ggplot_graph, echo=FALSE, fig.width=10}
+ggplot(base1, aes(factor(anio),Export))+
+  geom_boxplot()+
+  ggtitle("Exportaciones por año \n(En millones de dolares)")+
+  theme(plot.title = element_text(size = 16, colour = "blue",vjust = 2,
+                                  hjust = 0.5))+
+  labs(x="Año",y="Exportaciones")
+```
+
+## Grafico de barras no apiladas
+
+```{r graph_barras, echo=FALSE, fig.width=10}
+base3 <- base %>%
+  mutate(anio=year(Periodo),
+         mes=month(Periodo)) %>%
+  select(anio, mes, Depositos, Creditos)
+
+base_agrup <- melt(base3, id.vars = c("anio","mes"))
+
+ggplot(base_agrup, aes(factor(anio), value, fill = variable))+
+  geom_bar(stat="identity", position = "dodge")+
+  labs(title = "Evolucion de depositos y cartera",
+       subtitle = "(En millones de dolares)",
+       x= "Año",
+       y= "Mill $us")+
+  theme(axis.text.x = element_text(angle=90))
+```
+
+## Grafico de lineas
+
+```{r graph_lineas, echo=FALSE, fig.width=10}
+base4 <- base %>%
+  select(Periodo, IGAE, IPC)
+
+base_agrup1 <- melt(base4, id.vars = "Periodo")
+
+ggplot(base_agrup1, aes(Periodo, value))+
+  geom_line()+facet_wrap(.~variable, scales = "free")+
+  geom_smooth(method = "lm")
+```
+
+## Usando dygraphs o plotly
+
+```{r graph1, echo=FALSE, fig.width=10}
+baseplotly <- base %>%
+  select(Periodo, Export)
+
+str(baseplotly)
+
+fig <- plot_ly(baseplotly, type = 'scatter', mode = 'lines')%>%
+  add_trace(x = ~Periodo, y = ~Export)
+fig
+```
